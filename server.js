@@ -1,67 +1,67 @@
 const Hapi = require("@hapi/hapi");
-const { Storage } = require("@google-cloud/storage");
-const pool = require("./db");
-const dotenv = require("dotenv");
-const fs = require("fs");
-const path = require("path");
+const { Storage } = require("@google-cloud/storage"); // Library Google Cloud Storage
+const pool = require("./db"); // Pool koneksi database (dikonfigurasi terpisah)
+const dotenv = require("dotenv"); // Library untuk membaca file .env
+const fs = require("fs"); // Library Node.js untuk manipulasi file
+const path = require("path"); // Library untuk manipulasi path file
 
-dotenv.config();
+dotenv.config(); // Menginisialisasi dotenv agar dapat membaca variabel di file .env
 
-const storage = new Storage();
-const bucketName = process.env.BUCKET_NAME;
-console.log(bucketName);
+const storage = new Storage(); // Inisialisasi client GCP Storage
+const bucketName = process.env.BUCKET_NAME; // Nama bucket diambil dari .env
+console.log(bucketName); // debugging untuk cek nama bucket sudah ada
 
 const init = async () => {
   const server = Hapi.server({
-    port: 3000,
-    host: "localhost",
+    port: 3000, // Port server
+    host: "localhost", // Host server
     routes: {
       cors: {
-        origin: ["*"],
+        origin: ["*"], // Mengaktifkan CORS untuk semua origin
       },
     },
   });
 
-  // Route: Upload File
+  // endpoint Upload File
   server.route({
     method: "POST",
     path: "/upload",
     options: {
       payload: {
-        output: "stream",
-        allow: "multipart/form-data",
-        parse: true,
-        multipart: true,
-        maxBytes: 10 * 1024 * 1024, // 10MB
+        output: "stream", // Input akan diproses sebagai stream
+        allow: "multipart/form-data", // Format yang diterima adalah form-data
+        parse: true, // Parsing otomatis payload
+        multipart: true, // Memastikan payload berisi multipart data
+        maxBytes: 10 * 1024 * 1024, // Maksimal ukuran file adalah 10MB
       },
     },
     handler: async (request, h) => {
-      const { file } = request.payload;
+      const { file } = request.payload; // Mengambil file dari request payload
 
       if (!file) {
         return h.response({ error: "File tidak ditemukan!" }).code(400);
       }
 
-      const fileName = `${Date.now()}-${file.hapi.filename}`;
-      const storagePath = `uploads/${fileName}`;
+      const fileName = `${Date.now()}-${file.hapi.filename}`; // Nama file unik
+      const storagePath = `uploads/${fileName}`; // Lokasi penyimpanan di bucket
 
       try {
-        // Upload file ke Google Cloud Storage
-        const bucket = storage.bucket(bucketName);
-        const fileUpload = bucket.file(storagePath);
+        const bucket = storage.bucket(bucketName); // Ambil referensi bucket
+        const fileUpload = bucket.file(storagePath); // File di dalam bucket
         const writeStream = fileUpload.createWriteStream({
-          metadata: { contentType: file.hapi.headers["content-type"] },
+          metadata: { contentType: file.hapi.headers["content-type"] }, // Metadata file
         });
 
+        // Streaming file ke Google Cloud Storage
         file.pipe(writeStream);
 
         await new Promise((resolve, reject) => {
-          file.on("end", resolve);
-          writeStream.on("error", reject);
-          writeStream.on("finish", resolve);
+          file.on("end", resolve); // Resolusi ketika upload selesai
+          writeStream.on("error", reject); // Error saat upload
+          writeStream.on("finish", resolve); // Resolusi ketika stream selesai
         });
 
-        const publicUrl = `https://storage.googleapis.com/${bucketName}/${storagePath}`;
+        const publicUrl = `https://storage.googleapis.com/${bucketName}/${storagePath}`; // URL publik file
 
         // Simpan metadata ke database
         const [result] = await pool.query("INSERT INTO files (file_name, file_url) VALUES (?, ?)", [fileName, publicUrl]);
